@@ -60,4 +60,62 @@ except StopIteration as result:
 ```
 
 #### What is `async def` under the hood?
+`async def` or `async` key words are alot more complicated under the hood than `await`.
+Before `async` became a keyword you would have to decorate your function with `@asyncio.coroutine` to wrap your code in a coroutine class, however we have to re-create the coroutine class itself.
+
+**A coroutine remake in Python**
+```py
+# python 3.8
+import asyncio
+
+
+# We're going to try recreate this coroutine by
+# making a class with the required dunder methods.
+#
+# This coroutine just returns the parameter it's given.
+async def my_coroutine(arg1):
+    return arg1
+
+
+# Our coroutine copy takes arg1 just like my_coroutine,
+# we can save this to somewhere, in this case we're setting it
+# to arg1 as a instance variable.
+class MyCoroutineCopy:
+    def __init__(self, arg1):
+        self.arg1 = arg1
+
+    # __await__ is required to register with the `await` keyword returning self.
+    def __await__(self):
+        return self
+
+    # __iter__ is used just to return a iterator, we dont need this to be self
+    # but for the sake of this we're using the class itself as a iterator.
+    def __iter__(self):
+        return self
+
+    # __next__ is used to make our coroutine class a generator which can either
+    # return to symbolise a yield or raise StopIteration(value) to return the
+    # output of the coroutine
+    def __next__(self):
+        # we'll do what my_coroutine does and echo the first parameter
+        raise StopIteration(self.arg1)
+
+
+async def main():
+    result = await my_coroutine("foo")
+    print(f"my_coroutine returned with: {repr(result)}")
+
+    result = await MyCoroutineCopy("foo")
+    print(f"MyCoroutineCopy returned with: {repr(result)}")
+
+
+asyncio.run(main())
+```
+
+**Output:**
+```
+my_coroutine returned with: 'foo'
+MyCoroutineCopy returned with: 'foo'
+```
+
 
