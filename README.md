@@ -185,7 +185,7 @@ fn await_foo(py: Python, foo: PyObject) -> PyResult<()> {
 
             // if it errors we know we're done.
             Err(e) => {
-                if let Ok(stop_iteration) = e.pvalue(py).extract::<PyStopIteration>() {
+                if let Ok(stop_iteration) = e.pvalue(py).downcast::<PyStopIteration>() {
                     let returned_value = stop_iteration.getattr("value")?;
                     
                     // Let's display that result of ours
@@ -212,5 +212,4 @@ fn await_from_rust(_py: Python, m: &PyModule) -> PyResult<()> {
     Ok(())
 }
 ```
-
 
