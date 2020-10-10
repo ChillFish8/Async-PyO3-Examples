@@ -13,7 +13,7 @@ You will also be without yeild from (under the hood `await`) so you should think
 
 
 ## How AsyncIO works in Python under the hood
-Python's AsyncIO is built off the idea of a event loop and generator coroutines allowing functions to be suspended and resumed which is managed by the event loop when a `await` block is hit. This gives us the idea of single threaded concurrency.
+Python's AsyncIO is built off the idea of a event loop and generator coroutines allowing functions to be suspended and resumed which is managed by the event loop when a `await` block is hit. This gives us the affect of single threaded concurrency.
 
 ### Breaking down async/await
 Since Python 3.5.5 synatic sugar methods of `async` and `await` make our lives alot easier by doing all the heavy lifting for us keeping all the messy internals hidden away.
