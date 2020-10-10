@@ -1,7 +1,7 @@
 # Async-PyO3-Examples
 A repo to help people to interact with AsyncIO with PyO3 native extensions.
 
-## Relevant Warning
+## A Word Of Warning
 Please read through these warnings before jumping into this, asyncio at the low level is fairly complicated and is definitley **not** recommended for begginers who have little to no understanding of AsyncIO.
 
 #### Writing coroutines in Rust and Pyo3 will not make them 'faster'
@@ -118,4 +118,5 @@ my_coroutine returned with: 'foo'
 MyCoroutineCopy returned with: 'foo'
 ```
 
+## Converting It To Rust
 
