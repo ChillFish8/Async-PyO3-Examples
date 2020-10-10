@@ -8,7 +8,7 @@ Please read through these warnings before jumping into this, asyncio at the low 
 creating and running the coroutine will actually be *slower* on average so please do not enter this believing that if you write all your coroutines in Rust just to gain execution speed, They'll only be faster if what you plan todo inside them can be sped up by Rust but *need* to be coroutines in order to achieve that.
 
 #### Low level coroutines are *not* simple 
-No matter how you look at it coroutines in PyO3 will not be easy to write, you have no syntactic sugar methods like `async` and `await` (The Rust future implementations do not work).]
+No matter how you look at it coroutines in PyO3 will not be easy to write, you have no syntactic sugar methods like `async` and `await` (The Rust future implementations do not work).
 You will also be without yeild from (under the hood `await`) so you should think of how you are going to structure your code going into it.
 
 
