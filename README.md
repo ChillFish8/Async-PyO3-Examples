@@ -118,7 +118,7 @@ my_coroutine returned with: 'foo'
 MyCoroutineCopy returned with: 'foo'
 ```
 
-## Converting It To Rust
+## Converting It To Rust - IN PROGESS
 Now we've got all the concepts out of the way and under our tool belt we can actually start to recreate this is Rust using PyO3.
 
 We'll start by breaking down and recreating our first Python example recreating a `await`:
