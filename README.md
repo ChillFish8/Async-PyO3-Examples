@@ -123,6 +123,28 @@ Now we've got all the concepts out of the way and under our tool belt we can act
 
 We'll start by breaking down and recreating our first Python example recreating a `await`:
 
+**Setting up boilerplate:**
+```rust
+// lets get our basics setup first
+use pyo3::prelude::*;
+use pyo3::wrap_pyfunction;
+
+
+// We're going to create a basic function just to house our awaiting
+#[pyfunction]
+fn await_foo(py: Python, foo: PyObject) -> PyResult<()> {
+    // We'll add our code here soon
+}
+
+
+// Lets just call our module await_from_rust for simplicity.
+#[pymodule]
+fn await_from_rust(_py: Python, m: &PyModule) -> PyResult<()> {
+    m.add_function(wrap_pyfunction!(await_foo, m)?).unwrap();
+    Ok(())
+}
+```
+
 **our finished function that `awaits` a coroutine:**
 ```rust
 // lets get our basics setup first
@@ -185,7 +207,7 @@ fn await_foo(py: Python, foo: PyObject) -> PyResult<()> {
 }
 
 #[pymodule]
-fn async_rust(_py: Python, m: &PyModule) -> PyResult<()> {
+fn await_from_rust(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(await_foo, m)?).unwrap();
     Ok(())
 }
