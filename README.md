@@ -119,4 +119,20 @@ MyCoroutineCopy returned with: 'foo'
 ```
 
 ## Converting It To Rust
+Now we've got all the concepts out of the way and under our tool belt we can actually start to recreate this is Rust using PyO3.
+
+We'll start by breaking down and recreating our first Python example recreating a `await`:
+
+**Some Boilerplate:**
+```rust
+// lets get our basics setup first
+use pyo3::prelude::*;
+
+// We're going to create a basic function just to house our awaiting
+#[pyfunction]
+fn await_foo(py: Python, foo: PyObject) {
+    // todo
+}
+ ```
+
 
