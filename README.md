@@ -123,7 +123,7 @@ Now we've got all the concepts out of the way and under our tool belt we can act
 
 We'll start by breaking down and recreating our first Python example recreating a `await`:
 
-**Some Boilerplate:**
+**our finished function that `awaits` a coroutine:**
 ```rust
 // lets get our basics setup first
 use pyo3::prelude::*;
