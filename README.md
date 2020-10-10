@@ -165,7 +165,7 @@ fn await_foo(py: Python, foo: PyObject) -> PyResult<()> {
 
     // We call __iter__  on the coroutine using call_method0 for no parameters
     // to expose the generator aspect of the coroutine
-    my_iterator = my_iterator.call_method0(py, "__iter__")?;
+    my_iterator = my_iterator.iter()?;
 
     // Unlike python we cant wrap this in a try except / we dont want to.
     // so for this we'll just use loop to iterate over it like While True
@@ -185,18 +185,18 @@ fn await_foo(py: Python, foo: PyObject) -> PyResult<()> {
 
             // if it errors we know we're done.
             Err(e) => {
-                // We have to strip off the exception name because its added by PyO3
-                // making it like "StopIteration: some value"
-                let unclean_value = e.pvalue(py).to_string();
+                if let Ok(stop_iteration) = e.pvalue(py).extract::<PyStopIteration>() {
+                    let returned_value = stop_iteration.getattr("value")?;
+                    
+                    // Let's display that result of ours
+                    println!("Result of our coroutine: {:?}", returned_value);
 
-                // There is probably a much better method of doing this.
-                let clean_value = unclean_value.trim_start_matches("StopIteration: ");
-
-                // Lets display that result of ours
-                println!("Result of our coroutine: {:?}", clean_value);
-
-                // Time to escape from this while loop.
-                return Ok(());
+                    // Time to escape from this while loop.
+                    return Ok(());
+                } else {
+                    return Err(e);
+                } 
+                
             }
         };
     }
