@@ -127,12 +127,68 @@ We'll start by breaking down and recreating our first Python example recreating 
 ```rust
 // lets get our basics setup first
 use pyo3::prelude::*;
+use pyo3::wrap_pyfunction;
+
 
 // We're going to create a basic function just to house our awaiting
 #[pyfunction]
-fn await_foo(py: Python, foo: PyObject) {
-    // todo
+fn await_foo(py: Python, foo: PyObject) -> PyResult<()> {
+
+    // We call it like we did in python
+    let mut my_iterator  = foo.call0(py)?;
+
+    // We call __await__ on the coroutine using call_method0 for no parameters
+    // as part of the async API
+    my_iterator = my_iterator.call_method0(py, "__await__")?;
+
+    // We call __iter__  on the coroutine using call_method0 for no parameters
+    // to expose the generator aspect of the coroutine
+    my_iterator = my_iterator.call_method0(py, "__iter__")?;
+
+    // Unlike python we cant wrap this in a try except / we dont want to.
+    // so for this we'll just use loop to iterate over it like While True
+    // and match the result.
+    let mut result: PyResult<PyObject>;     // Saves us constantly re-declaring it.
+    loop {
+
+        // We call __next__ which is all the next() function does in Python.
+        result = my_iterator.call_method0(py, "__next__");
+
+        // lets match if the iterator has returned or raised StopIteration.
+        // For this example we are assuming that no other error will ever be
+        // raised for the sake of simplicity.
+        match result {
+            // If its okay (it returned normally) we call next again.
+            Ok(r) => continue,
+
+            // if it errors we know we're done.
+            Err(e) => {
+                // We have to strip off the exception name because its added by PyO3
+                // making it like "StopIteration: some value"
+                let unclean_value = e.pvalue(py).to_string();
+
+                // There is probably a much better method of doing this.
+                let clean_value = unclean_value.trim_start_matches("StopIteration: ");
+
+                // Lets display that result of ours
+                println!("Result of our coroutine: {:?}", clean_value);
+
+                // Time to escape from this while loop.
+                return Ok(());
+            }
+        };
+    }
+
+    // Rust will warn that this is unreachable, probably a good idea to
+    // add a timeout in your actual code.
+    Ok(())
 }
- ```
+
+#[pymodule]
+fn async_rust(_py: Python, m: &PyModule) -> PyResult<()> {
+    m.add_function(wrap_pyfunction!(await_foo, m)?).unwrap();
+    Ok(())
+}
+```
 
 
