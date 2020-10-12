@@ -124,6 +124,9 @@ Now we've got all the concepts out of the way and under our tool belt we can act
 We'll start by breaking down and recreating our first Python example recreating a `await`:
 
 **Setting up boilerplate:**
+This is just our standard bit of setup, if you already have a existing bit of code with this in you can ignore it.
+Though for the purposes of learning it would be a good idea to have a seperate area to mess with before putting it in your actual code.
+
 ```rust
 // lets get our basics setup first
 use pyo3::prelude::*;
@@ -144,6 +147,65 @@ fn await_from_rust(_py: Python, m: &PyModule) -> PyResult<()> {
     Ok(())
 }
 ```
+
+**Producing our iterator from a coroutine:**
+A few things differ when we want to setup our coroutine call in Rust because we can make use of the C api directly which can help with efficency. 
+`call_method`'s are generally quite expensive calls so reducing them where we can has the potential to improve our performance.
+
+Our code to produce the iterator, notice how we use `iter()` instead of `call_method0(py, "__iter__")`, 
+always a good idea to check the docs to see if the thing you're doing supports direct calls rather than going through `call_method`.
+```rust
+// We call it like we did in python
+let mut my_iterator  = foo.call0(py)?;
+
+// We call __await__ on the coroutine using call_method0 for no parameters
+// as part of the async API
+my_iterator = my_iterator.call_method0(py, "__await__")?;
+
+// We call __iter__  on the coroutine using call_method0 for no parameters
+// to expose the generator aspect of the coroutine
+my_iterator = my_iterator.iter()?;
+```
+
+**actually using our iterator**
+Now we have our iterator we can use `loop` to call next until it's exhuasted. Unlike Python we dont have try/except (not in the same way atleast) so our loop is positioned slightly diffrent than our Python example.
+
+```rust
+// Unlike python we cant wrap this in a try except / we dont want to.
+// so for this we'll just use loop to iterate over it like While True
+// and match the result.
+let mut result: PyResult<PyObject>;     // Saves us constantly re-declaring it.
+loop {
+
+    // We call __next__ which is all the next() function does in Python.
+    result = my_iterator.call_method0(py, "__next__");
+
+    // lets match if the iterator has returned or raised StopIteration.
+    // For this example we are assuming that no other error will ever be
+    // raised for the sake of simplicity.
+    match result {
+        // If its okay (it returned normally) we call next again.
+        Ok(r) => continue,
+
+        // if it errors we know we're done.
+        Err(e) => {
+            if let Ok(stop_iteration) = e.pvalue(py).downcast::<PyStopIteration>() {
+                let returned_value = stop_iteration.getattr("value")?;
+                    
+                // Let's display that result of ours
+                println!("Result of our coroutine: {:?}", returned_value);
+
+                // Time to escape from this while loop.
+                return Ok(());
+             } else {
+                return Err(e);
+             } 
+                
+        }
+   };
+}
+```
+
 
 **our finished function that `awaits` a coroutine:**
 ```rust
