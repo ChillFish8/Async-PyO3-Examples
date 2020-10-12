@@ -122,7 +122,8 @@ MyCoroutineCopy returned with: 'foo'
 Now we've got all the concepts out of the way and under our tool belt we can actually start to recreate this is Rust using PyO3.
 
 We'll start by breaking down and recreating our first Python example recreating a `await`:
-
+<br><br>
+### Re-Creating Python's `await` in Rust
 **Setting up boilerplate:**
 This is just our standard bit of setup, if you already have a existing bit of code with this in you can ignore it.
 Though for the purposes of learning it would be a good idea to have a seperate area to mess with before putting it in your actual code.
@@ -274,4 +275,7 @@ fn await_from_rust(_py: Python, m: &PyModule) -> PyResult<()> {
     Ok(())
 }
 ```
-
+<br>
+Great! Now we've managed to `await` our coroutines and understand that concept we can start to build our own coroutines.
+<br><br>
+### Re-Creating Coroutines in Python
