@@ -276,7 +276,15 @@ fn await_from_rust(_py: Python, m: &PyModule) -> PyResult<()> {
 }
 ```
 <br>
-Great! Now we've managed to `await` our coroutines and understand that concept we can start to build our own coroutines.
+Great! Now we've managed to `await` our coroutines and understand that concept we can start to build our own coroutines.<br>
+Now this is where it starts to get a little bit more complicated because we are without `yield` or `yield from` directly, 
+however, good news! PyO3 already implements some helper functions to make our life a little bit easier with a `yield` function and `return` function for iterators.
+Other than that we need to implement the requrires dunder methods (double underscore methods e.g `__init__`) this cannot be done via simply making a function called it unless specificially stated.
+<br><br>
+
+We're going to use the `#[pyproto]` macro for a couple things:
+- For implementing `__await__` by implying the `PyAsyncProtocol`.
+- For implementing the `__iter__` and `__next__` methods by implying the `PyIterProtocol`
 <br><br>
 
 ### Re-Creating Coroutines in Python
