@@ -285,9 +285,13 @@ Other than that we need to implement the requrires dunder methods (double unders
 <br><br>
 
 We're going to use the `#[pyproto]` macro for a couple things:
-- For implementing `__await__` by implying the `PyAsyncProtocol`.
-- For implementing the `__iter__` and `__next__` methods by implying the `PyIterProtocol`
+- For implementing `__await__` by implying the `PyAsyncProtocol`
+- For implementing the `__iter__` and `__next__` methods by implying the `PyIterProtocol`, see [the docs for more about iterators in PyO3](https://pyo3.rs/v0.12.3/class/protocols.html?highlight=Iter#iterator-types)
 <br><br>
+
+**Setting up our boilerplate:**
+Like we did with `await` we need to setup some basic boiler plate for the sake of demonstatration.
+
 
 ### Re-Creating Coroutines in Python
 
