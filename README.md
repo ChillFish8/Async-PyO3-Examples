@@ -276,6 +276,8 @@ fn await_from_rust(_py: Python, m: &PyModule) -> PyResult<()> {
 }
 ```
 <br>
+
+### Re-Creating Python's `async def`/coroutines in Rust
 Great! Now we've managed to `await` our coroutines and understand that concept we can start to build our own coroutines.<br>
 Now this is where it starts to get a little bit more complicated because we are without `yield` or `yield from` directly, 
 however, good news! PyO3 already implements some helper functions to make our life a little bit easier with a `yield` function and `return` function for iterators.
