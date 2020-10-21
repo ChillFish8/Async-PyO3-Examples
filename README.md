@@ -1,7 +1,14 @@
 # Async-PyO3-Examples
 A repo to help people to interact with AsyncIO with PyO3 native extensions.
 
-## A Word Of Warning
+# Contents
+
+- **[Introduction]()** *If you're new to this book you will want to read this*
+- **[Breaking Down Python]()** *Goes through the internals of how AsyncIO with async and await is implemented*
+- **[Implementing Rust]()** *Takes what we learnt from [Breaking Down Python]() and applies it to our Rust code* - **In Development**
+
+
+## Introduction - A Word Of Warning
 Please read through these warnings before jumping into this, asyncio at the low level is fairly complicated and is definitley **not** recommended for begginers who have little to no understanding of AsyncIO.
 
 #### Writing coroutines in Rust and Pyo3 will not make them 'faster'
@@ -12,7 +19,7 @@ No matter how you look at it coroutines in PyO3 will not be easy to write, you h
 You will also be without yeild from (under the hood `await`) so you should think of how you are going to structure your code going into it.
 
 
-## How AsyncIO works in Python under the hood
+## Breaking Down Python - How AsyncIO works in Python under the hood
 Python's AsyncIO is built off the idea of a event loop and generator coroutines allowing functions to be suspended and resumed which is managed by the event loop when a `await` block is hit. This gives us the affect of single threaded concurrency.
 
 ### Breaking down async/await
@@ -118,7 +125,7 @@ my_coroutine returned with: 'foo'
 MyCoroutineCopy returned with: 'foo'
 ```
 
-## Converting It To Rust - IN PROGESS
+## Implementing Rust - IN PROGESS
 Now we've got all the concepts out of the way and under our tool belt we can actually start to recreate this is Rust using PyO3.
 
 We'll start by breaking down and recreating our first Python example recreating a `await`:
@@ -292,6 +299,7 @@ We're going to use the `#[pyproto]` macro for a couple things:
 **Setting up our boilerplate:**<br>
 Like we did with `await` we need to setup some basic boiler plate for the sake of demonstatration.
 
+Our struct `MyCoroutine` will form the bases for our awaitable, it is important to note now that this will not be identified as a `coroutine` type by Python but as a awaitable type instead. This will mean things like `asyncio.create_task()` wont work but `asyncio.ensure_future()` will.
 
 ```rust
 // lets get our basics setup first
