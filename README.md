@@ -3,7 +3,7 @@ A repo to help people to interact with AsyncIO with PyO3 native extensions.
 
 # Contents
 
-- **[Introduction](Implementing Rust)** *If you're new to this book you will want to read this*
+- **[Introduction](https://github.com/ChillFish8/Async-PyO3-Examples/blob/main/README.md#introduction---a-word-of-warning)** *If you're new to this book you will want to read this*
 - **[Breaking Down Python]()** *Goes through the internals of how AsyncIO with async and await is implemented*
 - **[Implementing Rust]()** *Takes what we learnt from [Breaking Down Python]() and applies it to our Rust code* - **In Development**
 
