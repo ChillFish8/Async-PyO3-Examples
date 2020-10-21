@@ -237,7 +237,7 @@ fn await_foo(py: Python, foo: PyObject) -> PyResult<()> {
     loop {
 
         // We call __next__ which is all the next() function does in Python.
-        result = my_iterator.call_method0(py, "__next__");
+        result = my_iterator.next();
 
         // lets match if the iterator has returned or raised StopIteration.
         // For this example we are assuming that no other error will ever be
