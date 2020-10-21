@@ -293,6 +293,24 @@ We're going to use the `#[pyproto]` macro for a couple things:
 Like we did with `await` we need to setup some basic boiler plate for the sake of demonstatration.
 
 
+```rust
+// lets get our basics setup first
+use pyo3::prelude::*;
+
+// Our base Python class that will do the job of Python's
+// coroutine class.
+#[pyclass]
+struct MyCoroutine;
+
+// Lets just call our module await_from_rust for simplicity.
+#[pymodule]
+fn await_from_rust(_py: Python, m: &PyModule) -> PyResult<()> {
+    m.add_class::<MyCoroutine>()?;
+    Ok(())
+}
+```
+
+
 ### Re-Creating Coroutines in Python
 
 This is still todo...
