@@ -380,7 +380,7 @@ impl PyAsyncProtocol for MyCoroutine {
 impl PyIterProtocol for MyCoroutine {
     // This is a optional function, if you dont want todo anything like returning a existing iterator
     // dont worry about implementing this.
-    fn __iter__(slf: Self::Receiver) -> Self::Result {
+    fn __iter__(slf: PyRef<Self>) -> PyRef<Self> {
         slf
     }
     
