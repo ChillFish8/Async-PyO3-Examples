@@ -318,7 +318,7 @@ fn await_from_rust(_py: Python, m: &PyModule) -> PyResult<()> {
 }
 ```
 
-**Making it 'awaitable'**
+**Making it 'awaitable'**<br>
 Python has a very simple system for making a object awaitable, simply `await` calls `__await__` under the hood, we can recreate this using the `pyproto` macro and the `PyAsyncProtocol`.
 
 ```rust
@@ -355,7 +355,7 @@ fn await_from_rust(_py: Python, m: &PyModule) -> PyResult<()> {
 
 However, this simple setup still carries alot of use. If you have something that just needs to be awaitable and transfer some pre-computed fields to a existing awaitable or PyObject we can just create the object -> call `__await__` and return that. This can make things considerably easier if your Rust coroutines are simply acting as a middle man for some efficent code.
 
-**Making our awaitable a iterable**
+**Making our awaitable a iterable**<br>
 It should be important to note that just because something is awaitable does not make it a coroutine, coroutines are essentially self contained classes that return `self` on both `__await__` and `__iter__` calls and execute the actual code upon the `__next__` call (Please note I am heavily simplifying it to make sense of the following Rust code.)
 
 Just like we did with `__await__` we can use `pyproto` to implement the iterable dunder methods:
