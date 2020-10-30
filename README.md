@@ -308,7 +308,7 @@ use pyo3::prelude::*;
 // Our base Python class that will do the job of Python's
 // coroutine class.
 #[pyclass]
-struct MyCoroutine;
+struct MyCoroutine {} 
 
 // Lets just call our module await_from_rust for simplicity.
 #[pymodule]
@@ -318,7 +318,86 @@ fn await_from_rust(_py: Python, m: &PyModule) -> PyResult<()> {
 }
 ```
 
+**Making it 'awaitable'**
+Python has a very simple system for making a object awaitable, simply `await` calls `__await__` under the hood, we can recreate this using the `pyproto` macro and the `PyAsyncProtocol`.
 
-### Re-Creating Coroutines in Python
+```rust
+// lets get our basics setup first
+use pyo3::prelude::*;
+
+// Our base Python class that will do the job of Python's
+// coroutine class.
+#[pyclass]
+struct MyCoroutine {} 
+
+// Adding out async protocol, this makes use awaitable.
+// it should be important to note: DO NOT LISTEN TO YOUR LINTER.
+// Your linter can get very, very confused at this system and will
+// want you to implement things that you do *not* want to implement
+// to 'satisfy' this protocol implementation.
+// even if it highlights in red the bellow implementation will stil compile.
+#[pyproto]
+impl PyAsyncProtocol for ASGIRunner {   
+    fn __await__(slf: PyRef<Self>) -> PyRef<Self> {
+        slf     // We're saying that we are the iterable part of the coroutine.
+    }
+}
+
+// Lets just call our module await_from_rust for simplicity.
+#[pymodule]
+fn await_from_rust(_py: Python, m: &PyModule) -> PyResult<()> {
+    m.add_class::<MyCoroutine>()?;
+    Ok(())
+}
+```
+
+*Wow! is it that easy to make a coroutine?* - Sadly not quite, the `slf` reference does not allow us to internally call functions we've defined, in the above example as well we are telling Python that our iterable is itself. This will crash if we try to run this on Python now because we're missing the iterator protocol.
+
+However, this simple setup still carries alot of use. If you have something that just needs to be awaitable and transfer some pre-computed fields to a existing awaitable or PyObject we can just create the object -> call `__await__` and return that. This can make things considerably easier if your Rust coroutines are simply acting as a middle man for some efficent code.
+
+**Making our awaitable a iterable**
+It should be important to note that just because something is awaitable does not make it a coroutine, coroutines are essentially self contained classes that return `self` on both `__await__` and `__iter__` calls and execute the actual code upon the `__next__` call (Please note I am heavily simplifying it to make sense of the following Rust code.)
+
+Just like we did with `__await__` we can use `pyproto` to implement the iterable dunder methods:
+```rust
+// lets get our basics setup first
+use pyo3::prelude::*;
+
+// Our base Python class that will do the job of Python's
+// coroutine class.
+#[pyclass]
+struct MyCoroutine {} 
+
+// Adding out async protocol, this makes use awaitable.
+#[pyproto]
+impl PyAsyncProtocol for MyCoroutine {   
+    fn __await__(slf: PyRef<Self>) -> PyRef<Self> {
+        slf     // We're saying that we are the iterable part of the coroutine.
+    }
+}
+
+#[pyproto]
+impl PyIterProtocol for MyCoroutine {
+    // This is a optional function, if you dont want todo anything like returning a existing iterator
+    // dont worry about implementing this.
+    fn __iter__(slf: Self::Receiver) -> Self::Result {
+        slf
+    }
+    
+    // There are other return types you can give however IterNextOutput is by far the biggest
+    // helper you will get when making coroutines.
+    fn __next__(_slf: PyRefMut<Self>) -> IterNextOutput<Option<PyObject>, &'static str> {
+        IterNextOutput::Return("Ended")
+    }
+}
+
+// Lets just call our module await_from_rust for simplicity.
+#[pymodule]
+fn await_from_rust(_py: Python, m: &PyModule) -> PyResult<()> {
+    m.add_class::<MyCoroutine>()?;
+    Ok(())
+}
+```
+
 
 This is still todo...
