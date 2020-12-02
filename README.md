@@ -337,7 +337,7 @@ struct MyCoroutine {}
 // to 'satisfy' this protocol implementation.
 // even if it highlights in red the bellow implementation will stil compile.
 #[pyproto]
-impl PyAsyncProtocol for ASGIRunner {   
+impl PyAsyncProtocol for MyCoroutine  {   
     fn __await__(slf: PyRef<Self>) -> PyRef<Self> {
         slf     // We're saying that we are the iterable part of the coroutine.
     }
