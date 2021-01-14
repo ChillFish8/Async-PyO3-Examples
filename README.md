@@ -362,6 +362,10 @@ Just like we did with `__await__` we can use `pyproto` to implement the iterable
 ```rust
 // lets get our basics setup first
 use pyo3::prelude::*;
+use pyo3::iter::IterNextOutput;
+use pyo3::PyIterProtocol;
+use pyo3::PyAsyncProtocol;
+use pyo3::wrap_pyfunction;
 
 // Our base Python class that will do the job of Python's
 // coroutine class.
@@ -391,13 +395,43 @@ impl PyIterProtocol for MyCoroutine {
     }
 }
 
+// Exposing our custom awaitable to Python.
+// This will behave like a coroutine.
+#[pyfunction]
+fn my_coroutine() -> MyCoroutine {
+    MyCoroutine {}
+}
+
 // Lets just call our module await_from_rust for simplicity.
 #[pymodule]
 fn await_from_rust(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<MyCoroutine>()?;
+    m.add_function(wrap_pyfunction!(my_coroutine, m)?).unwrap();
     Ok(())
 }
 ```
 
+And now we can call our Rust coroutine from Python.
 
-This is still todo...
+```py
+# python 3.8
+import asyncio
+
+import await_from_rust
+
+
+async def main():
+    # Everything works as if it was coroutine...
+    result = await await_from_rust.my_coroutine()
+    print(f"my_coroutine returned with: {result!r}")
+
+# But note that this won't work:
+# asyncio.run(await_from_rust.my_coroutine())
+# because asyncio won't recognise it as a `coroutine` object
+
+asyncio.run(main())
+```
+
+### Using Rust's futures as Python awaitables
+
+TODO... ;)
