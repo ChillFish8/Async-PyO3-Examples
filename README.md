@@ -20,14 +20,14 @@ You will also be without yeild from (under the hood `await`) so you should think
 
 
 ## Breaking Down Python - How AsyncIO works in Python under the hood
-Python's AsyncIO is built off the idea of a event loop and generator coroutines allowing functions to be suspended and resumed which is managed by the event loop when a `await` block is hit. This gives us the affect of single threaded concurrency.
+Python's AsyncIO is built off the idea of an event loop and generator coroutines allowing functions to be suspended and resumed which is managed by the event loop when a `await` block is hit. This gives us the effect of single threaded concurrency.
 
 ### Breaking down async/await
-Since Python 3.5.5 synatic sugar methods of `async` and `await` make our lives alot easier by doing all the heavy lifting for us keeping all the messy internals hidden away.
+Since Python 3.5.5 the syntactic sugar keywords `async` and `await` make our lives a lot easier by doing all the heavy lifting for us, keeping all the messy internals hidden away.
 However, this wasn't always a thing. In Python versions older than 3.5.5 we were left with manually decorating our functions and using `yield from` (more on this later), if you've worked with async in Python 2 or old versions of Python 3 this might come easier to you.
 
 #### What is `await` under the hood?
-await is basically a `yield from` wrapper after calling the coroutine and then calling `__await__`, which is all we really need to know for the sake of writing async extensions in Rust, the next question you will probably have is "well... What's yield from?", glad you asked! All we need to know about yield from is that we yield the results from another iterator until it's exhuased (All coroutines are generators so all support being iterated over which will support yield from) however, we cannot use `yield from` in our Rust code so here's what we would do logically in Rust (Implemented in Python).
+await is basically a `yield from` wrapper after calling the coroutine and then calling `__await__`, which is all we really need to know for the sake of writing async extensions in Rust, the next question you will probably have is "well... What's yield from?", glad you asked! All we need to know about yield from is that we yield the results from another iterator until it's exhausted (All coroutines are generators so all support being iterated over which will support yield from) however, we cannot use `yield from` in our Rust code so here's what we would do logically in Rust (Implemented in Python).
 
 **Example code:**
 ```py
@@ -67,7 +67,7 @@ except StopIteration as result:
 ```
 
 #### What is `async def` under the hood?
-`async def` or `async` key words are alot more complicated under the hood than `await`.
+`async def` or `async` key words are a lot more complicated under the hood than `await`.
 Before `async` became a keyword you would have to decorate your function with `@asyncio.coroutine` to wrap your code in a coroutine class, however we have to re-create the coroutine class itself.
 
 **A coroutine remake in Python**
@@ -96,7 +96,8 @@ class MyCoroutineCopy:
         return self
 
     # __iter__ is used just to return a iterator, we dont need this to be self
-    # but for the sake of this we're using the class itself as a iterator.
+    # but for the sake of this we're using the class itself as an iterator.
+    # Note that it is required for old-style generator-based coroutines compatibility.
     def __iter__(self):
         return self
 
@@ -124,6 +125,197 @@ asyncio.run(main())
 my_coroutine returned with: 'foo'
 MyCoroutineCopy returned with: 'foo'
 ```
+
+---
+
+### A look behind the scenes
+
+So far, we've only showed you how to make a coroutine, not how to make a coroutine *asynchronous*.
+That is, how to interact with *other* systems in a *non-blocking* way (disk access, network access, other threads, etc. Everything that we call I/O.). All the code that we've shown so far, even if using `async` and `await` keywords, is synchronous, it runs sequentially.
+
+Here's the proof:
+
+``` python
+# python 3.8
+import asyncio
+
+
+async def level3(i):
+    print(f"task {i} reached the bottom, exiting...")
+
+
+async def level2(i):
+    print(f"task {i} entering level 3")
+    result = await level3(i)
+    print(f"task {i} exiting level 3")
+
+
+async def level1(i):
+    print(f"task {i} entering level 2")
+    result = await level2(i)
+    print(f"task {i} exiting level 2")
+
+
+async def main():
+    return await asyncio.gather(*[level1(i) for i in range(3)])
+
+
+asyncio.run(main())
+```
+
+The above code will always, deterministicly, produce the following output. (Try and play with the code a little, to convince yourself.)
+
+```
+task 0 entering level 2
+task 0 entering level 3
+task 0 reached the bottom, exiting...
+task 0 exiting level 3
+task 0 exiting level 2
+task 1 entering level 2
+task 1 entering level 3
+task 1 reached the bottom, exiting...
+task 1 exiting level 3
+task 1 exiting level 2
+task 2 entering level 2
+task 2 entering level 3
+task 2 reached the bottom, exiting...
+task 2 exiting level 3
+task 2 exiting level 2
+```
+
+And this is good! As long as there is nothing to wait for, we just chain the iterators, and keep going down the async stack, and your CPU doesn't waste cycles on expensive context switches.
+
+So, to sum it up, `async` and `await` are the building blocks of asynchronous computations, they *enable* asynchronicity, but they don't, *by themselves*, make your program magically asynchronous.
+
+For that, we're missing a key element that lies in deep in the guts of asyncio, because just like with any magic, there's a trick, and to find it, we have to take a look behind the scenes.
+
+That missing piece of the puzzle is, well, the `Future`.
+Not the Rust one, the [`asyncio.Future`](https://docs.python.org/3.8/library/asyncio-future.html#asyncio.Future).
+
+In essence, if you think of the async call stack as a tree, the Futures are always the leafs.
+They represent the very moment where you are about to wait for an I/O operation, and you want to tell the async loop "Alright, I can't go any further now, could you please put my parent task on hold?
+**Someone will *call* you *back* when I'm ready to proceed**"
+
+#### Implementing your own (Python) future
+
+So, to illustrate, let's implement our very own dumb future, that will spawn a thread to wake it up after some time.
+
+``` python
+# python 3.8
+import asyncio
+from asyncio.exceptions import InvalidStateError
+import threading
+import time
+
+
+class MyFuture:
+    def __init__(self, result):
+        """ So here is our future. From the user's perspective, it takes result in
+            and will spit the square of that result after 1s when you await it.
+        """
+        self._result = result
+        # The loop is here for asyncio's sanity checks but also to schedule the
+        # resuming of the task once the future is completed
+        self._loop = None
+        # The callbacks is a list of functions to be called when the future completes
+        self._callbacks = []
+        # Now this is an ugly bit as it serves a double purpose:
+        # First, the loop will check that it's present as a flag of whether this
+        # future is advertising itself to be asyncio compatible or not.
+        # Second, it's value determines if the Task should be put on the waiting
+        # queue. This is exactly what we want, so we set it to True.
+        self._asyncio_future_blocking = True
+
+    def __await__(self):
+        # Now that we're in an async context, we store the loop
+        self._loop = asyncio.get_running_loop()
+
+
+        def sleep_and_return(result):
+            """ Here is what's going to run in our thread.
+                We simulate some computations, and then return the result.
+                The task will be woken up on the next cycle of the loop.
+                Note that we're using the thread-safe variant of call_soon.
+                (This is all to avoid deadlocks.)
+            """
+            time.sleep(1)
+            # More about `self._set_result` later
+            self._loop.call_soon_threadsafe(self._set_result, result * result)
+
+
+        threading.Thread(target=sleep_and_return, args=(self._result,)).start()
+        # We forget our result. It will be the thread's job to set it back.
+        self._result = None
+        # We are the iterator
+        return self
+
+    def __next__(self):
+        # This will be called immediately afterwards, but the thread won't be
+        # finished yet, so...
+        if self._result is None:
+            # ... Here's the trick! We yield... ourself! A future!
+            return self
+            # Asyncio will now check _asyncio_future_blocking... True.
+            # "So, we have a future here, let's check its loop... get_loop()?"
+        raise StopIteration(self._result)
+
+    def get_loop(self):
+        return self._loop
+        # "... Yes, the loop matches, alright, let's give it a callback..."
+
+    def add_done_callback(self, callback, *, context=None):
+        self._callbacks.append((callback, context))
+        # "... Put it on the waiting queue, and forget about it."
+        # Now the loop is free to do something else, or sleep...
+        # Until our thread finishes and calls:
+    
+    def _set_result(self, result):
+        """ This is our waker. It will set the result and schedule the
+            callbacks to resume our task.
+            One very important note is that it's a separate function as it
+            needs to be an atomic operation that happens on the main thread.
+            (Otherwise the loop might resume before the external thread is
+            finished and we end up in a deadlock.)
+        """
+        self._result = result
+        # This code is taken straight from asyncio's source code
+        for cb, ctx in self._callbacks:
+            self._loop.call_soon(cb, self, context=ctx)
+        self._callbacks[:] = []
+
+    # Now, before resuming, the first thing asyncio does is call `.result()`
+    # Don't ask me why, as the return is just ignored, but it does.
+    # Maybe it's there to mirror `concurrent.futures.Future`, and the source
+    # implementation uses it in the `__await__` function so maybe that's to avoid
+    # code duplication ? But then why call it as part of the loop and force it
+    # as part of the Future API? I just don't know
+    def result(self):
+        if self._result is None:
+            # This is never called, the exception is there to prove you that the
+            # task will only be resumed once the result is ready once again
+            raise InvalidStateError('result is not ready')
+        return None
+        # Now the task is resumed and __next__ is called a final time to
+        # provide the result.
+
+async def wrapper(i):
+    """ Simulating some depth in the call async stack.
+        (It also let's us make shortcut of initialising _asyncio_future_blocking
+        to True.)
+    """
+    return await MyFuture(i)
+
+async def main():
+    """ To show you that this is indeed async, let's spawn a thousand of those
+        futures that will all complete after 1 second.
+    """
+    results = await asyncio.gather(*[wrapper(i) for i in range(1000)])
+    print(results)
+
+asyncio.run(main())
+```
+
+---
 
 ## Implementing Rust - IN PROGESS
 Now we've got all the concepts out of the way and under our tool belt we can actually start to recreate this is Rust using PyO3.
