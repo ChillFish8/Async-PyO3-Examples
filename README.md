@@ -189,10 +189,10 @@ So, to sum it up, `async` and `await` are the building blocks of asynchronous co
 
 For that, we're missing a key element that lies in deep in the guts of asyncio, because just like with any magic, there's a trick, and to find it, we have to take a look behind the scenes.
 
-That missing piece of the puzzle is, well, the `Future`.
+That missing piece of the puzzle is - well - the `Future`.
 Not the Rust one, the [`asyncio.Future`](https://docs.python.org/3.8/library/asyncio-future.html#asyncio.Future).
 
-In essence, if you think of the async call stack as a tree, the Futures are always the leafs.
+In essence, if you think of the async call stack as a tree, the Futures are always the leaves.
 They represent the very moment where you are about to wait for an I/O operation, and you want to tell the async loop "Alright, I can't go any further now, could you please put my parent task on hold?
 **Someone will *call* you *back* when I'm ready to proceed**"
 
@@ -210,7 +210,7 @@ import time
 
 class MyFuture:
     def __init__(self, result):
-        """ So here is our future. From the user's perspective, it takes result in
+        """ So here is our future. From the user's perspective, it takes `result` in
             and will spit the square of that result after 1s when you await it.
         """
         self._result = result
@@ -300,7 +300,7 @@ class MyFuture:
 
 async def wrapper(i):
     """ Simulating some depth in the call async stack.
-        (It also let's us make shortcut of initialising _asyncio_future_blocking
+        (It also lets us make the shortcut of initialising _asyncio_future_blocking
         to True.)
     """
     return await MyFuture(i)
@@ -318,13 +318,13 @@ asyncio.run(main())
 ---
 
 ## Implementing Rust - IN PROGESS
-Now we've got all the concepts out of the way and under our tool belt we can actually start to recreate this is Rust using PyO3.
+Now we've got all the concepts out of the way and under our tool belt we can actually start to recreate this in Rust using PyO3.
 
 We'll start by breaking down and recreating our first Python example recreating a `await`:
 <br><br>
 ### Re-Creating Python's `await` in Rust
 **Setting up boilerplate:**
-This is just our standard bit of setup, if you already have a existing bit of code with this in you can ignore it.
+This is just our standard bit of setup, if you already have an existing bit of code with this in, you can ignore it.
 Though for the purposes of learning it would be a good idea to have a seperate area to mess with before putting it in your actual code.
 
 ```rust
@@ -489,9 +489,10 @@ We're going to use the `#[pyproto]` macro for a couple things:
 <br><br>
 
 **Setting up our boilerplate:**<br>
-Like we did with `await` we need to setup some basic boiler plate for the sake of demonstatration.
+Like we did with `await` we need to setup some basic boiler plate for the sake of demonstration.
 
-Our struct `MyCoroutine` will form the bases for our awaitable, it is important to note now that this will not be identified as a `coroutine` type by Python but as a awaitable type instead. This will mean things like `asyncio.create_task()` wont work but `asyncio.ensure_future()` will.
+Our struct `MyAwaitable` will form the basis for our awaitable, it is important to note now that this will not be identified as a `coroutine` type by Python but as an awaitable type instead.
+This will mean things like `asyncio.create_task()` wont work but `asyncio.ensure_future()` will.
 
 ```rust
 // lets get our basics setup first
@@ -500,18 +501,18 @@ use pyo3::prelude::*;
 // Our base Python class that will do the job of Python's
 // coroutine class.
 #[pyclass]
-struct MyCoroutine {} 
+struct MyAwaitable {} 
 
-// Lets just call our module await_from_rust for simplicity.
+// Let's make it an other module since we're now doing the opposite: awaitable_rust
 #[pymodule]
-fn await_from_rust(_py: Python, m: &PyModule) -> PyResult<()> {
-    m.add_class::<MyCoroutine>()?;
+fn awaitable_rust(_py: Python, m: &PyModule) -> PyResult<()> {
+    m.add_class::<MyAwaitable>()?;
     Ok(())
 }
 ```
 
 **Making it 'awaitable'**<br>
-Python has a very simple system for making a object awaitable, simply `await` calls `__await__` under the hood, we can recreate this using the `pyproto` macro and the `PyAsyncProtocol`.
+Python has a very simple system for making an object awaitable, `await` simply  calls `__await__` under the hood. We can recreate this using the `pyproto` macro and the `PyAsyncProtocol`.
 
 ```rust
 // lets get our basics setup first
@@ -520,34 +521,34 @@ use pyo3::prelude::*;
 // Our base Python class that will do the job of Python's
 // coroutine class.
 #[pyclass]
-struct MyCoroutine {} 
+struct MyAwaitable {} 
 
-// Adding out async protocol, this makes use awaitable.
-// it should be important to note: DO NOT LISTEN TO YOUR LINTER.
+// Adding out async protocol, this makes us awaitable.
+// It should be important to note: DO NOT LISTEN TO YOUR LINTER.
 // Your linter can get very, very confused at this system and will
 // want you to implement things that you do *not* want to implement
 // to 'satisfy' this protocol implementation.
-// even if it highlights in red the bellow implementation will stil compile.
+// Even if it highlights in red the below implementation will stil compile.
 #[pyproto]
-impl PyAsyncProtocol for MyCoroutine  {   
+impl PyAsyncProtocol for MyAwaitable  {   
     fn __await__(slf: PyRef<Self>) -> PyRef<Self> {
         slf     // We're saying that we are the iterable part of the coroutine.
     }
 }
 
-// Lets just call our module await_from_rust for simplicity.
+// let's make it an other module since we're now doing the opposite: awaitable_rust
 #[pymodule]
-fn await_from_rust(_py: Python, m: &PyModule) -> PyResult<()> {
-    m.add_class::<MyCoroutine>()?;
+fn awaitable_rust(_py: Python, m: &PyModule) -> PyResult<()> {
+    m.add_class::<MyAwaitable>()?;
     Ok(())
 }
 ```
 
 *Wow! is it that easy to make a coroutine?* - Sadly not quite, the `slf` reference does not allow us to internally call functions we've defined, in the above example as well we are telling Python that our iterable is itself. This will crash if we try to run this on Python now because we're missing the iterator protocol.
 
-However, this simple setup still carries alot of use. If you have something that just needs to be awaitable and transfer some pre-computed fields to a existing awaitable or PyObject we can just create the object -> call `__await__` and return that. This can make things considerably easier if your Rust coroutines are simply acting as a middle man for some efficent code.
+However, this simple setup still carries a lot of use. If you have something that just needs to be awaitable and transfer some pre-computed fields to an existing awaitable or PyObject you can just create the object -> call `__await__` and return that. This can make things considerably easier if your Rust coroutines are simply acting as a middle man for some efficent code.
 
-**Making our awaitable a iterable**<br>
+**Making our awaitable an iterable**<br>
 It should be important to note that just because something is awaitable does not make it a coroutine, coroutines are essentially self contained classes that return `self` on both `__await__` and `__iter__` calls and execute the actual code upon the `__next__` call (Please note I am heavily simplifying it to make sense of the following Rust code.)
 
 Just like we did with `__await__` we can use `pyproto` to implement the iterable dunder methods:
@@ -562,26 +563,26 @@ use pyo3::wrap_pyfunction;
 // Our base Python class that will do the job of Python's
 // coroutine class.
 #[pyclass]
-struct MyCoroutine {} 
+struct MyAwaitable {} 
 
-// Adding out async protocol, this makes use awaitable.
+// Adding out async protocol, this makes us awaitable.
 #[pyproto]
-impl PyAsyncProtocol for MyCoroutine {   
+impl PyAsyncProtocol for MyAwaitable {   
     fn __await__(slf: PyRef<Self>) -> PyRef<Self> {
         slf     // We're saying that we are the iterable part of the coroutine.
     }
 }
 
 #[pyproto]
-impl PyIterProtocol for MyCoroutine {
-    // This is a optional function, if you dont want todo anything like returning a existing iterator
-    // dont worry about implementing this.
+impl PyIterProtocol for MyAwaitable {
+    // This is an optional function. If you dont want to do anything like returning
+    // an existing iterator, dont worry about implementing this.
     fn __iter__(slf: PyRef<Self>) -> PyRef<Self> {
         slf
     }
     
-    // There are other return types you can give however IterNextOutput is by far the biggest
-    // helper you will get when making coroutines.
+    // There are other return types you can give, however IterNextOutput is by far the biggest
+    // helper you will get when making awaitables.
     fn __next__(_slf: PyRefMut<Self>) -> IterNextOutput<Option<PyObject>, &'static str> {
         IterNextOutput::Return("Ended")
     }
@@ -590,14 +591,14 @@ impl PyIterProtocol for MyCoroutine {
 // Exposing our custom awaitable to Python.
 // This will behave like a coroutine.
 #[pyfunction]
-fn my_coroutine() -> MyCoroutine {
-    MyCoroutine {}
+fn my_awaitable() -> MyAwaitable {
+    MyAwaitable {}
 }
 
-// Lets just call our module await_from_rust for simplicity.
+// let's make it an other module since we're now doing the opposite: awaitable_rust
 #[pymodule]
-fn await_from_rust(_py: Python, m: &PyModule) -> PyResult<()> {
-    m.add_class::<MyCoroutine>()?;
+fn awaitable_rust(_py: Python, m: &PyModule) -> PyResult<()> {
+    m.add_class::<MyAwaitable>()?;
     m.add_function(wrap_pyfunction!(my_coroutine, m)?).unwrap();
     Ok(())
 }
@@ -609,12 +610,12 @@ And now we can call our Rust coroutine from Python.
 # python 3.8
 import asyncio
 
-import await_from_rust
+import awaitable_rust
 
 
 async def main():
     # Everything works as if it was coroutine...
-    result = await await_from_rust.my_coroutine()
+    result = await awaitable_rust.my_awaitable()
     print(f"my_coroutine returned with: {result!r}")
 
 # But note that this won't work:
@@ -626,4 +627,26 @@ asyncio.run(main())
 
 ### Using Rust's futures as Python awaitables
 
-TODO... ;)
+What if you could turn your rust `async` functions into awaitable Python objects?
+
+Turns out, Rust's and Python's `async`/`await` models aren't that different and can be made to work together.
+
+#### Comparison of Python's and Rust's `async`/`await` models
+
+[Earlier](#implementing-your-own-python-future) we broke down how futures work in python, which should hopefully have given us a good enough understanding of the Python `async`/`await` strategy.
+
+Now, if you haven't already, you should read [this chapter](https://rust-lang.github.io/async-book/02_execution/01_chapter.html) of the async Rust book which does an excellent job at explaining how `Futures` work in Rust. 
+
+And armed with this knowledge we should have everything we need to write the glue to make those two work together, but for the sake of this explanation, let's recap:
+
+- In Python (asyncio), `async def`s translate to `coroutine`s.
+These coroutines are just generators that yield from other generators (coroutines) whenever they encounter an `await` statement until they hit an `asyncio.Future` (a leaf) down the chain.
+Then the whole `Task` (stack of generators/coroutines) is put on the waiting queue, and callbacks are setup on the Future to resume the Task once ready.
+This process repeats until the Task finishes with a result.
+- In Rust, async blocks are compiled down to state machines that advance between each state of waiting when polled, until they reach the final Ready state.
+This is conceptually equivalent to Python's approach:
+async blocks are syntactic sugar for structs that `impl` the `std::future::Future` trait by wrapping other objects that `impl` the trait.
+Somewhere down the line, there will be a leaf Future that actually waits for some I/O and implements the trait manually.
+Along this line is passed a `Waker` that will be used to signal when the whole (compiled) Future is ready to be resumed.
+
+In summary, async blocks are coroutines, wakers are callbacks, futures are futures, and future stacks compiled to state machines are Tasks.
