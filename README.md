@@ -650,3 +650,175 @@ Somewhere down the line, there will be a leaf Future that actually waits for som
 Along this line is passed a `Waker` that will be used to signal when the whole (compiled) Future is ready to be resumed.
 
 In summary, async blocks are coroutines, wakers are callbacks, futures are futures, and future stacks compiled to state machines are Tasks.
+
+#### Implementing a Python future in Rust
+
+To hammer down what we've learned so far and as a first step, let's reimplement [our asyncio future](#implementing-your-own-python-future) in Rust.
+I recommend you keep the Python version opened on the side to follow along.
+
+```rust
+use {
+    pyo3::{iter::IterNextOutput, prelude::*, types::IntoPyDict, PyAsyncProtocol, PyIterProtocol},
+    std::{thread, time::Duration},
+};
+
+// So this is our class, except it's now implemented in Rust!
+// I have kept the same layout so you can follow the corresponding Python code.
+#[pyclass]
+struct MyFuture {
+    // `result` is now concretized to a u32 for the sake of the example, where
+    // in Python it could have been anything. You can use PyObject if you want.
+    result: Option<u32>,
+    aio_loop: Option<PyObject>,
+    callbacks: Vec<(PyObject, Option<PyObject>)>,
+    #[pyo3(get, set)]
+    _asyncio_future_blocking: bool,
+}
+
+#[pyproto]
+impl PyAsyncProtocol for MyFuture {
+    fn __await__(slf: Py<Self>) -> PyResult<Py<Self>> {
+        // Only locking the GIL for what we need
+        let (result, aio_loop) = Python::with_gil(|py| -> PyResult<_> {
+            let mut slf = slf.try_borrow_mut(py)?;
+            let aio_loop: PyObject = PyModule::import(py, "asyncio")?
+                .call0("get_running_loop")?
+                .into();
+            slf.aio_loop = Some(aio_loop.clone());
+            Ok((slf.result.take(), aio_loop))
+        })?;
+        // We know we have a result thanks to the contstructor
+        let result = result.expect("result uninitialised");
+
+        // Now this is not obvious at first, but think of our Python implementation,
+        // when we passed `self._set_result` to `call_soon_threadsafe`.
+        // `self._set_result` is actually an object.
+        // An object that wraps (or closes over) some pointers to call a function.
+        // This is our handcrafted lambda to wake our task.
+        #[pyclass]
+        struct WakerClosure {
+            result: u32,
+            aio_loop: PyObject,
+            future: Py<MyFuture>,
+        }
+
+        let future = slf.clone();
+        thread::spawn(move || {
+            thread::sleep(Duration::from_secs(1));
+            let waker = WakerClosure {
+                result: result * result,
+                aio_loop: aio_loop.clone(),
+                future,
+            };
+            Python::with_gil(|py| aio_loop.call_method1(py, "call_soon_threadsafe", (waker,)))
+                .expect("exception thrown by the event loop (probably closed)");
+        });
+
+        // When the thread is finished, on its next iteration, the loop will
+        // call our waker, which in turn will call the registered callbacks.
+        #[pymethods]
+        impl WakerClosure {
+            #[call]
+            pub fn __call__(slf: PyRef<Self>) -> PyResult<()> {
+                let py = slf.py();
+                // We should be the only ones borrowing the future.
+                // The only moment when that's not true, is when the future
+                // finishes so fast, that it tries to wake the task before the
+                // callbacks are registered. But in this example it never happens.
+                let mut future = slf.future.try_borrow_mut(py)?;
+                future.result = Some(slf.result);
+                // The same code from asyncio, only translated to rust.
+                let callbacks = std::mem::take(&mut future.callbacks);
+                for (callback, context) in callbacks {
+                    slf.aio_loop.call_method(
+                        py,
+                        "call_soon_threadsafe",
+                        (callback, &future),
+                        Some(vec![("context", context)].into_py_dict(py)),
+                    )?;
+                }
+                Ok(())
+            }
+        }
+
+        // Again, why we need to do this 2-step callback here, is because we 
+        // absolutely cannot let the task be woken up before the thread finishes.
+        // Otherwise we end up in a deadlock, with the main thread waiting for 
+        // our child thread, which waits for the main thread to release the GIL.
+        // So we avoid shared state in the child thread, and keep its 
+        // interaction with the GIL to a bare minimum.
+        // Now, in this simple example it might seem a bit contrived, as we have
+        // control over everything the thread does, but it will become clear
+        // why it's necessary when Rust futures are involved.
+
+        Ok(slf)
+    }
+}
+
+// The rest is a pretty straight-forward translation.
+
+#[pyproto]
+impl PyIterProtocol for MyFuture {
+    fn __next__(slf: PyRef<Self>) -> IterNextOutput<PyRef<Self>, u32> {
+        match slf.result {
+            None => IterNextOutput::Yield(slf),
+            Some(result) => IterNextOutput::Return(result),
+        }
+    }
+}
+
+#[pymethods]
+impl MyFuture {
+    #[new]
+    fn new(result: u32) -> Self {
+        Self {
+            result: Some(result),
+            aio_loop: None,
+            callbacks: vec![],
+            _asyncio_future_blocking: true,
+        }
+    }
+
+    fn get_loop(&self) -> Option<&PyObject> {
+        self.aio_loop.as_ref()
+    }
+
+    fn add_done_callback(&mut self, callback: PyObject, context: Option<PyObject>) {
+        self.callbacks.push((callback, context));
+    }
+
+    fn result(&self) -> Option<PyObject> {
+        None
+    }
+}
+
+#[pymodule]
+fn awaitable_rust(_py: Python, m: &PyModule) -> PyResult<()> {
+    m.add_class::<MyFuture>()?;
+    Ok(())
+}
+```
+
+And of course our little shim of Python to see it in action.
+
+```python
+# python 3.8
+import asyncio
+import time
+# Bonus! You can try it with a different asyncio-compatible loop
+#import uvloop
+
+import awaitable_rust
+
+async def wrapper(i):
+    return await awaitable_rust.MyFuture(i)
+
+async def main():
+    results = await asyncio.gather(*[wrapper(i) for i in range(1000)])
+    print(results)
+
+
+#uvloop.install()
+asyncio.run(main())
+
+```
