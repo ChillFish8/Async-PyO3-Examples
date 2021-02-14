@@ -317,7 +317,7 @@ asyncio.run(main())
 
 ---
 
-## Implementing Rust - IN PROGESS
+## Implementing Rust
 Now we've got all the concepts out of the way and under our tool belt we can actually start to recreate this in Rust using PyO3.
 
 We'll start by breaking down and recreating our first Python example recreating a `await`:
@@ -822,3 +822,245 @@ async def main():
 asyncio.run(main())
 
 ```
+
+#### Bridging the gap
+
+For the next step, let's throw some *Rust* futures in the mix.
+We will turn the thread code into a struct implementing the `std::future::Future` trait and make our *Python* future await it.
+
+For that we will simply be adapting [the `TimerFuture` from the Asynchronous Programming in Rust book](https://rust-lang.github.io/async-book/02_execution/03_wakeups.html#applied-build-a-timer) as it (not so) coincidentally looks very much like what we have been implementing so far.
+
+```rust
+use {
+    futures::{
+        future::{BoxFuture, FutureExt},
+        task::{waker_ref, ArcWake},
+    },
+    pyo3::{
+        iter::IterNextOutput, prelude::*, types::IntoPyDict, wrap_pyfunction, PyAsyncProtocol,
+        PyIterProtocol,
+    },
+    std::{
+        future::Future,
+        pin::Pin,
+        sync::{Arc, Mutex},
+        task::{Context, Poll, Waker},
+        thread,
+        time::Duration,
+    },
+};
+
+// Straight from Asynchronous Programming in Rust, I have removed the comments
+// and commented what I changed.
+pub struct TimerFuture {
+    shared_state: Arc<Mutex<SharedState>>,
+}
+
+struct SharedState {
+    /// This bool is now an option with our result
+    result: Option<u32>,
+
+    waker: Option<Waker>,
+}
+
+impl Future for TimerFuture {
+    type Output = u32; // The Future now returns something
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let mut shared_state = self.shared_state.lock().unwrap();
+        match shared_state.result {
+            Some(result) => Poll::Ready(result),
+            None => {
+                shared_state.waker = Some(cx.waker().clone());
+                Poll::Pending
+            }
+        }
+    }
+}
+
+impl TimerFuture {
+    /// The timer is now hardcoded to 1 and we take the result to return instead
+    pub fn new(result: u32) -> Self {
+        let shared_state = Arc::new(Mutex::new(SharedState {
+            result: None,
+            waker: None,
+        }));
+
+        // And here is the gist of it. We're essentially still doing the same thing:
+        // Spawn a thread, wait 1s, square the result, set the result, wake the task
+        let thread_shared_state = shared_state.clone();
+        thread::spawn(move || {
+            thread::sleep(Duration::from_secs(1));
+            let mut shared_state = thread_shared_state.lock().unwrap();
+            shared_state.result = Some(result * result);
+            if let Some(waker) = shared_state.waker.take() {
+                // Note here that we are still locking the shared state when
+                // calling the waker. This will be relevant later.
+                waker.wake()
+            }
+        });
+
+        TimerFuture { shared_state }
+    }
+}
+
+#[pyclass]
+struct MyFuture {
+    // Now we're encapsulating a Rust future
+    future: BoxFuture<'static, u32>,
+    aio_loop: Option<PyObject>,
+    callbacks: Vec<(PyObject, Option<PyObject>)>,
+    #[pyo3(get, set)]
+    _asyncio_future_blocking: bool,
+    // And we keep a reference to the waker that we will be passing to the
+    // rust future
+    waker: Option<Arc<WakerClosure>>,
+}
+
+impl MyFuture {
+    // The constructor is now internal and takes a Future that must be Send + 'static
+    // in order to be `.boxed()` (Python couldn't possibly pass us a Future anyway)
+    fn new(future: impl Future<Output = u32> + Send + 'static) -> Self {
+        Self {
+            future: future.boxed(),
+            aio_loop: None,
+            callbacks: vec![],
+            _asyncio_future_blocking: true,
+            waker: None,
+        }
+    }
+}
+
+#[pyproto]
+impl PyAsyncProtocol for MyFuture {
+    fn __await__(slf: Py<Self>) -> PyResult<Py<Self>> {
+        let py_future = slf.clone();
+        Python::with_gil(|py| -> PyResult<_> {
+            let mut slf = slf.try_borrow_mut(py)?;
+            let aio_loop: PyObject = PyModule::import(py, "asyncio")?
+                .call0("get_running_loop")?
+                .into();
+            slf.aio_loop = Some(aio_loop.clone());
+            slf.waker = Some(Arc::new(WakerClosure {
+                aio_loop,
+                py_future,
+            }));
+            Ok(())
+        })?;
+
+        Ok(slf)
+    }
+}
+
+#[pyproto]
+impl PyIterProtocol for MyFuture {
+    // Now MyFuture has truly become a Future wrapper
+    fn __next__(mut py_slf: PyRefMut<Self>) -> IterNextOutput<PyRefMut<Self>, u32> {
+        // This is so we can borrow both slf.waker & slf.future mutably
+        let slf = &mut *py_slf;
+        let waker = slf.waker.as_mut().expect("future was not awaited");
+        // Thanks to `futures` we don't need to implement the Waker pseudo-trait
+        // manually, so this is all boiler-plate to pass the Waker to the Future.
+        let waker_ref = waker_ref(&waker);
+        let context = &mut Context::from_waker(&*waker_ref);
+        match slf.future.as_mut().poll(context) {
+            Poll::Pending => {
+                // In case the future needs to be put on hold multiple times,
+                // we need to set this back to true every time we're in a
+                // Pending state. Asyncio always sets it to false after
+                // reading it when we yield ourself.
+                slf._asyncio_future_blocking = true;
+                IterNextOutput::Yield(py_slf)
+            }
+            Poll::Ready(result) => IterNextOutput::Return(result),
+        }
+    }
+}
+
+#[pyclass]
+#[derive(Clone)]
+struct WakerClosure {
+    aio_loop: PyObject,
+    py_future: Py<MyFuture>,
+}
+
+// WakerClosure now implements `futures::task::ArcWake` so it can be passed to a
+// Rust Future as a waker, like we did above.
+impl ArcWake for WakerClosure {
+    fn wake_by_ref(arc_self: &Arc<Self>) {
+        let closure = (**arc_self).clone();
+        Python::with_gil(|py| {
+            arc_self
+                .aio_loop
+                .call_method1(py, "call_soon_threadsafe", (closure,))
+        })
+        .expect("exception thrown by the event loop (probably closed)");
+        // Again, as a reminder, we are only setting ourself up to be called by
+        // the event loop from the main thread so this child thread is released
+        // before the task is woken up. Remember how the TimerFuture still has
+        // its shared state locked when calling `.wake()`? This is where it
+        // would have become a problem if we tried to call the callbacks directly.
+        // Of course, here, we could fix the issue in the TimerFuture's code, but
+        // in the wild we won't have control over how the waker is called.
+        // (That state locking issue isn't something I made up or introduced on
+        // purpose, it's genuinely the code from the async book.)
+    }
+}
+
+#[pymethods]
+impl WakerClosure {
+    // I didn't change anything here, but as an exercise, try and move the code
+    // from this function to `wake_by_ref` above to skip the double callback,
+    // and see what happens.
+    #[call]
+    pub fn __call__(slf: PyRef<Self>) -> PyResult<()> {
+        let py = slf.py();
+        let mut py_future = slf.py_future.try_borrow_mut(py)?;
+        let callbacks = std::mem::take(&mut py_future.callbacks);
+        for (callback, context) in callbacks {
+            slf.aio_loop.call_method(
+                py,
+                "call_soon_threadsafe",
+                (callback, &py_future),
+                Some(vec![("context", context)].into_py_dict(py)),
+            )?;
+        }
+        Ok(())
+    }
+}
+
+#[pymethods]
+impl MyFuture {
+    fn get_loop(&self) -> Option<&PyObject> {
+        self.aio_loop.as_ref()
+    }
+
+    fn add_done_callback(&mut self, callback: PyObject, context: Option<PyObject>) {
+        self.callbacks.push((callback, context));
+    }
+
+    fn result(&self) -> Option<PyObject> {
+        None
+    }
+}
+
+// All that's left to do now is to wrap the TimerFuture in MyFuture, and everything
+// works just as before.
+// (You'll have to update the Python shim to use this function.)
+#[pyfunction]
+fn my_timer_future(result: u32) -> MyFuture {
+    MyFuture::new(TimerFuture::new(result))
+}
+
+#[pymodule]
+fn awaitable_rust(_py: Python, m: &PyModule) -> PyResult<()> {
+    m.add_class::<MyFuture>()?;
+    m.add_function(wrap_pyfunction!(my_timer_future, m)?)?;
+    Ok(())
+}
+```
+
+**And with that you have a working wrapper for asyncio-driven Rust futures.**
+
+All that is left to do now is to generalise to any kind of future (by taking an `impl IntoPyObject` as `Output` for example), add a `cancel` method, potentially implement the `Waker` pseudo-trait manually for our `WakerClosure` to avoid wrapping it in an `Arc`, and generally polish some rough edges.
+
+But that is left to libraries to implement, or to the reader as an exercise.
