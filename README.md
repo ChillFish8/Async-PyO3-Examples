@@ -274,8 +274,10 @@ class MyFuture:
             callbacks to resume our task.
             One very important note is that it's a separate function as it
             needs to be an atomic operation that happens on the main thread.
-            (Otherwise the loop might resume before the external thread is
-            finished and we end up in a deadlock.)
+            (In this simple Python example it's actually not required, but I
+            prefer to introduce this 2-step callback technique early on because
+            it will prove necessary in the Rust implementation to sidestep
+            issues with threads.)
         """
         self._result = result
         # This code is taken straight from asyncio's source code
@@ -721,10 +723,8 @@ impl PyAsyncProtocol for MyFuture {
             #[call]
             pub fn __call__(slf: PyRef<Self>) -> PyResult<()> {
                 let py = slf.py();
-                // We should be the only ones borrowing the future.
-                // The only moment when that's not true, is when the future
-                // finishes so fast, that it tries to wake the task before the
-                // callbacks are registered. But in this example it never happens.
+                // As I've touched about earlier, we would have a problem if
+                // the following line ran on the child thread
                 let mut future = slf.future.try_borrow_mut(py)?;
                 future.result = Some(slf.result);
                 // The same code from asyncio, only translated to rust.
@@ -732,7 +732,7 @@ impl PyAsyncProtocol for MyFuture {
                 for (callback, context) in callbacks {
                     slf.aio_loop.call_method(
                         py,
-                        "call_soon_threadsafe",
+                        "call_soon",
                         (callback, &future),
                         Some(vec![("context", context)].into_py_dict(py)),
                     )?;
@@ -741,15 +741,9 @@ impl PyAsyncProtocol for MyFuture {
             }
         }
 
-        // Again, why we need to do this 2-step callback here, is because we 
-        // absolutely cannot let the task be woken up before the thread finishes.
-        // Otherwise we end up in a deadlock, with the main thread waiting for 
-        // our child thread, which waits for the main thread to release the GIL.
-        // So we avoid shared state in the child thread, and keep its 
+        // Again, why we need to do this 2-step callback here, is to avoid complications which could either lead to deadlocks or errors when we try to access shared state.
+        // So we keep shared state out of the child thread, and keep its 
         // interaction with the GIL to a bare minimum.
-        // Now, in this simple example it might seem a bit contrived, as we have
-        // control over everything the thread does, but it will become clear
-        // why it's necessary when Rust futures are involved.
 
         Ok(slf)
     }
@@ -962,6 +956,10 @@ impl PyIterProtocol for MyFuture {
         // manually, so this is all boiler-plate to pass the Waker to the Future.
         let waker_ref = waker_ref(&waker);
         let context = &mut Context::from_waker(&*waker_ref);
+        // Ideally, we should be releasing the GIL (which we are still holding
+        // with the PyRefMut) before calling `poll`, to avoid deadlocking.
+        // However in this example there is only one task per child thread so
+        // it cannot happen.
         match slf.future.as_mut().poll(context) {
             Poll::Pending => {
                 // In case the future needs to be put on hold multiple times,
@@ -1019,7 +1017,7 @@ impl WakerClosure {
         for (callback, context) in callbacks {
             slf.aio_loop.call_method(
                 py,
-                "call_soon_threadsafe",
+                "call_soon",
                 (callback, &py_future),
                 Some(vec![("context", context)].into_py_dict(py)),
             )?;
@@ -1061,6 +1059,6 @@ fn awaitable_rust(_py: Python, m: &PyModule) -> PyResult<()> {
 
 **And with that you have a working wrapper for asyncio-driven Rust futures.**
 
-All that is left to do now is to generalise to any kind of future (by taking an `impl IntoPyObject` as `Output` for example), add a `cancel` method, potentially implement the `Waker` pseudo-trait manually for our `WakerClosure` to avoid wrapping it in an `Arc`, and generally polish some rough edges.
+The remaining work is to generalise to any kind of future (by taking an `impl IntoPyObject` as `Output` for example), add a `cancel` method, potentially implement the `Waker` pseudo-trait manually for our `WakerClosure` to avoid wrapping it in an `Arc`, release the GIL when `poll`ing, and generally polish some rough edges.
 
 But that is left to libraries to implement, or to the reader as an exercise.
